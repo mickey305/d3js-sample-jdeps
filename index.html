@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <title>Hierarchical Dependency Graph</title>
+  <style>
+    .node circle {
+      stroke: #333;
+      stroke-width: 1.5px;
+      cursor: pointer;
+    }
+    .node text {
+      font-size: 12px;
+      font-family: sans-serif;
+      pointer-events: none;
+    }
+    .link {
+      stroke-opacity: 0.6;
+      fill: none;
+    }
+    .link.dependency {
+      stroke: #ff5722;
+    }
+    .link.hierarchy {
+      stroke: #999;
+    }
+  </style>
+</head>
+<body>
+  <svg width="960" height="800"></svg>
+
+  <script>
+    const width = 960, height = 800;
+
+    // Hierarchical data with dependency links (Apache Commons Lang example with more data)
+    const hierarchyData = {
+      name: "Apache Commons Lang",
+      type: "module",
+      children: [
+        {
+          name: "org.apache.commons.lang3",
+          type: "package",
+          children: [
+            {
+              name: "StringUtils",
+              type: "class",
+              children: [
+                { name: "isEmpty", type: "method" },
+                { name: "join", type: "method" },
+                { name: "split", type: "method" },
+                { name: "capitalize", type: "method" },
+                { name: "uncapitalize", type: "method" }
+              ]
+            },
+            {
+              name: "ObjectUtils",
+              type: "class",
+              children: [
+                { name: "defaultIfNull", type: "method" },
+                { name: "equals", type: "method" },
+                { name: "hashCode", type: "method" },
+                { name: "identityToString", type: "method" }
+              ]
+            },
+            {
+              name: "RandomStringUtils",
+              type: "class",
+              children: [
+                { name: "random", type: "method" },
+                { name: "randomAlphabetic", type: "method" },
+                { name: "randomNumeric", type: "method" },
+                { name: "randomAscii", type: "method" }
+              ]
+            }
+          ]
+        },
+        {
+          name: "org.apache.commons.text",
+          type: "package",
+          children: [
+            {
+              name: "StringEscapeUtils",
+              type: "class",
+              children: [
+                { name: "escapeHtml", type: "method" },
+                { name: "unescapeHtml", type: "method" },
+                { name: "escapeXml", type: "method" },
+                { name: "unescapeXml", type: "method" }
+              ]
+            },
+            {
+              name: "WordUtils",
+              type: "class",
+              children: [
+                { name: "capitalizeFully", type: "method" },
+                { name: "swapCase", type: "method" },
+                { name: "uncapitalize", type: "method" },
+                { name: "abbreviate", type: "method" }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    // Dependency links (example relationships between methods)
+    const dependencies = [
+      { source: "isEmpty", target: "join", type: "dependency" },
+      { source: "join", target: "split", type: "dependency" },
+      { source: "random", target: "escapeHtml", type: "dependency" }, // Cross-package dependency
+      { source: "defaultIfNull", target: "equals", type: "dependency" },
+      { source: "capitalize", target: "uncapitalize", type: "dependency" },
+      { source: "escapeHtml", target: "unescapeHtml", type: "dependency" },
+      { source: "escapeXml", target: "unescapeXml", type: "dependency" },
+      { source: "capitalizeFully", target: "swapCase", type: "dependency" },
+      { source: "split", target: "capitalizeFully", type: "dependency" }, // Cross-class dependency
+      { source: "randomAlphabetic", target: "abbreviate", type: "dependency" } // Cross-package dependency
+    ];
+
+    const svg = d3.select("svg"),
+          simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.data.name).distance(100))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collision", d3.forceCollide().radius(20));
+
+    const root = d3.hierarchy(hierarchyData);
+
+    const nodes = root.descendants();
+    const links = root.links().map(link => ({ ...link, type: "hierarchy" }))
+      .concat(dependencies.map(dep => {
+        const source = nodes.find(node => node.data.name === dep.source);
+        const target = nodes.find(node => node.data.name === dep.target);
+        return { source, target, type: dep.type };
+      }));
+
+    // Draw links
+    let link = svg.append("g")
+      .attr("class", "links")
+      .selectAll("line")
+      .data(links)
+      .enter()
+      .append("line")
+      .attr("class", d => `link ${d.type}`)
+      .attr("stroke-width", 2);
+
+    // Draw nodes
+    let node = svg.append("g")
+      .attr("class", "nodes")
+      .selectAll("g")
+      .data(nodes)
+      .enter()
+      .append("g")
+      .attr("class", "node")
+      .on("click", toggleVisibility)
+      .call(d3.drag()
+        .on("start", dragStarted)
+        .on("drag", dragged)
+        .on("end", dragEnded));
+
+    node.append("circle")
+      .attr("r", 10)
+      .attr("fill", d => {
+        switch (d.data.type) {
+          case "module": return "#1f77b4";
+          case "package": return "#ff7f0e";
+          case "class": return "#2ca02c";
+          case "method": return "#d62728";
+          default: return "#ccc";
+        }
+      });
+
+    node.append("text")
+      .attr("dy", 3)
+      .attr("x", 12)
+      .style("text-anchor", "start")
+      .text(d => d.data.name);
+
+    simulation.nodes(nodes).on("tick", ticked);
+    simulation.force("link").links(links);
+
+    function ticked() {
+      link
+        .attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+
+      node
+        .attr("transform", d => `translate(${d.x},${d.y})`);
+    }
+
+    function dragStarted(event, d) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+
+    function dragged(event, d) {
+      d.fx = event.x;
+      d.fy = event.y;
+    }
+
+    function dragEnded(event, d) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+
+    function toggleVisibility(event, d) {
+      if (d.children) {
+        d._children = d.children;
+        d.children = null;
+      } else {
+        d.children = d._children;
+        d._children = null;
+      }
+      update();
+    }
+
+    function update() {
+      const updatedNodes = root.descendants().filter(d => isVisible(d));
+      const updatedLinks = links.filter(link => isVisible(link.source) && isVisible(link.target));
+
+      node = node.data(updatedNodes, d => d.data.name);
+      node.exit().remove();
+
+      const nodeEnter = node.enter()
+        .append("g")
+        .attr("class", "node")
+        .on("click", toggleVisibility)
+        .call(d3.drag()
+          .on("start", dragStarted)
+          .on("drag", dragged)
+          .on("end", dragEnded));
+
+      nodeEnter.append("circle")
+        .attr("r", 10)
+        .attr("fill", d => {
+          switch (d.data.type) {
+            case "module": return "#1f77b4";
+            case "package": return "#ff7f0e";
+            case "class": return "#2ca02c";
+            case "method": return "#d62728";
+            default: return "#ccc";
+          }
+        });
+
+      nodeEnter.append("text")
+        .attr("dy", 3)
+        .attr("x", 12)
+        .style("text-anchor", "start")
+        .text(d => d.data.name);
+
+      node = nodeEnter.merge(node);
+
+      link = link.data(updatedLinks, d => `${d.source.data.name}-${d.target.data.name}`);
+      link.exit().remove();
+
+      link = link.enter()
+        .append("line")
+        .attr("class", d => `link ${d.type}`)
+        .attr("stroke-width", 2)
+        .merge(link);
+
+      simulation.nodes(updatedNodes);
+      simulation.force("link").links(updatedLinks);
+      simulation.alpha(0.3).restart();
+    }
+
+    function isVisible(d) {
+      while (d.parent) {
+        if (!d.parent.children) return false;
+        d = d.parent;
+      }
+      return true;
+    }
+  </script>
+</body>
+</html>
